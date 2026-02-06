@@ -1,0 +1,86 @@
+- name: Configure and Deploy StreamLine App
+  hosts: web
+  become: yes
+
+  vars:
+    web_root: "/var/www/html"
+
+    # ⭐ CHANGE HERE: your GitHub repo URL
+    repo_url: "https://github.com/YOUR_GITHUB_USERNAME/aws-capstone-exam.git"
+
+    # ⭐ CHANGE HERE: Jenkins/CLI will override this using -e app_version=v1/v2
+    app_version: "v1"
+
+    # ⭐ CHANGE HERE: use terraform output rds_endpoint
+    db_host: "RDS_ENDPOINT_HERE"
+
+    # (usually no change)
+    db_user: "admin"
+
+    # ⭐ CHANGE HERE: same password you used in terraform
+    db_pass: "database@123*"
+
+    # (usually no change)
+    db_name: "streamline"
+
+  tasks:
+    - name: Install packages (Apache, PHP, MySQL driver, Git)
+      yum:
+        name:
+          - httpd
+          - php
+          - php-mysqlnd
+          - git
+        state: present
+
+    - name: Start and enable Apache
+      service:
+        name: httpd
+        state: started
+        enabled: true
+
+    - name: Clean web root (remove old files)
+      file:
+        path: "{{ web_root }}"
+        state: absent
+
+    - name: Recreate web root directory
+      file:
+        path: "{{ web_root }}"
+        state: directory
+        mode: "0755"
+
+    - name: Clone repo
+      git:
+        repo: "{{ repo_url }}"
+        dest: /tmp/app
+        force: yes
+
+    - name: Copy selected app version to web root
+      copy:
+        src: "/tmp/app/app/{{ app_version }}/"
+        dest: "{{ web_root }}/"
+        remote_src: yes
+
+    - name: (Optional) Add db_check.php if exists in repo
+      copy:
+        src: "/tmp/app/app/db_check.php"
+        dest: "{{ web_root }}/db_check.php"
+        remote_src: yes
+      ignore_errors: yes
+
+    - name: Set DB env vars for Apache (Amazon Linux 2)
+      lineinfile:
+        path: /etc/sysconfig/httpd
+        line: 'export {{ item.key }}="{{ item.value }}"'
+        create: yes
+      loop:
+        - { key: "DB_HOST", value: "{{ db_host }}" }
+        - { key: "DB_USER", value: "{{ db_user }}" }
+        - { key: "DB_PASS", value: "{{ db_pass }}" }
+        - { key: "DB_NAME", value: "{{ db_name }}" }
+
+    - name: Restart Apache
+      service:
+        name: httpd
+        state: restarted
